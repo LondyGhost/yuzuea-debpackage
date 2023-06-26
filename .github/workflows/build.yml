@@ -1,0 +1,73 @@
+name: build debian package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install curl -y
+
+    - name: Get latest version
+      run: |
+        pkgver=$(curl -sL https://github.com/pineappleEA/pineapple-src/releases | grep -oP 'EA-\K[0-9]+' | head -n 1)
+        echo "pkgver=$pkgver" >> $GITHUB_ENV
+
+    - name: Download AppImage
+      run: |
+        wget https://github.com/pineappleEA/pineapple-src/releases/download/EA-${{ env.pkgver }}/Linux-Yuzu-EA-${{ env.pkgver }}.AppImage
+
+    - name: Extract and build AppImage
+      run: |
+        mkdir -p yuzu-ea
+        mv Linux-Yuzu-EA-${{ env.pkgver }}.AppImage yuzu-ea/
+        cd yuzu-ea
+        chmod +x Linux-Yuzu-EA-${{ env.pkgver }}.AppImage
+        ./Linux-Yuzu-EA-${{ env.pkgver }}.AppImage --appimage-extract
+        mkdir -p squashfs-root/DEBIAN
+        cat > squashfs-root/DEBIAN/control <<EOL
+        Package: yuzu-early-access
+        Version: ${{ env.pkgver }}
+        Architecture: amd64
+        Maintainer: Your Name <your.email@example.com>
+        Description: Yuzu Early Access is an experimental open-source emulator for the Nintendo Switch
+        EOL
+        dpkg-deb --build squashfs-root
+        cd ..
+        mv yuzu-ea/squashfs-root.deb yuzu-early-access-${{ env.pkgver }}_amd64.deb
+
+    - name: Cleanup
+      run: |
+        rm -rf yuzu-ea
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: yuzu-early-access-${{ env.pkgver }}_amd64.deb
+        path: yuzu-early-access-${{ env.pkgver }}_amd64.deb
+        
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.pkgver }}
+        release_name: Early-Access-${{ env.pkgver }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: yuzu-early-access-${{ env.pkgver }}_amd64.deb
+        asset_name: yuzu-early-access-${{ env.pkgver }}_amd64.deb
+        asset_content_type: application/vnd.debian.binary-package
